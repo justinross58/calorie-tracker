@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Calories</title>
+<meta name="theme-color" content="#F5F6F2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111412" media="(prefers-color-scheme: dark)">
+<meta name="description" content="A lightweight calorie and weight tracker. Your data stays on your phone.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preload" href="outfit-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- DAY -->
+  <main id="view-day" class="view" aria-label="Day">
+    <header class="day-head">
+      <button class="icon-btn" id="prev-day" aria-label="Previous day"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <button class="day-title" id="day-title" aria-label="Pick a date"><b id="day-name">Today</b><span id="day-sub"></span></button>
+      <button class="icon-btn" id="next-day" aria-label="Next day"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+      <input type="date" id="date-picker" aria-hidden="true" tabindex="-1" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px">
+    </header>
+    <div class="back-today"><button class="chip" id="back-today" hidden>Back to today <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button></div>
+
+    <section class="ring-wrap" aria-live="polite">
+      <div class="ring" id="ring">
+        <svg viewBox="0 0 260 260" aria-hidden="true">
+          <circle class="ring-track" cx="130" cy="130" r="110"/>
+          <circle class="ring-fg" id="ring-fg" cx="130" cy="130" r="110" transform="rotate(-90 130 130)" stroke-dasharray="0 691.15"/>
+        </svg>
+        <div class="ring-center"><div class="ring-num" id="ring-num">0</div><div class="ring-label" id="ring-label">calories left</div></div>
+      </div>
+      <div class="totals"><span><strong id="eaten">0</strong> eaten</span><span><strong id="goal">0</strong> goal</span></div>
+    </section>
+
+    <div class="banner" id="backup-banner" hidden>
+      <span>It's been a while since your last backup.</span>
+      <button class="chip" id="banner-export">Export</button>
+      <button class="icon-btn" id="banner-dismiss" aria-label="Dismiss" style="width:36px;height:36px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+
+    <section class="actions">
+      <div class="quick" id="quick" aria-label="Quick add"></div>
+      <button class="primary" id="add-btn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span id="add-label">Add calories</span></button>
+      <div class="row-actions"><button class="chip" id="weight-chip"></button></div>
+    </section>
+
+    <section class="list-wrap">
+      <h2 class="section-label" id="entries-title">Today's entries</h2>
+      <div class="card"><ul class="entries" id="entries"></ul></div>
+    </section>
+  </main>
+
+  <!-- TRENDS -->
+  <main id="view-trends" class="view" aria-label="Trends" hidden>
+    <h1 class="page-head">Trends</h1>
+    <div class="seg wide" role="group" aria-label="Chart">
+      <button data-tab="cal" aria-pressed="true">Calories</button>
+      <button data-tab="wt" aria-pressed="false">Weight</button>
+    </div>
+    <div id="trend-body"></div>
+  </main>
+
+  <!-- SETTINGS -->
+  <main id="view-settings" class="view" aria-label="Settings" hidden>
+    <h1 class="page-head">Settings</h1>
+    <div class="group-label">Goals</div>
+    <div class="group">
+      <label class="srow">Daily calorie goal <input class="field" id="set-goal" inputmode="numeric" pattern="[0-9]*" autocomplete="off"></label>
+      <label class="srow"><span>Target weight</span><input class="field" id="set-target" inputmode="decimal" autocomplete="off" placeholder="—"></label>
+    </div>
+    <p class="group-hint">A new goal applies from today on; past days keep theirs.</p>
+
+    <div class="group-label">Preferences</div>
+    <div class="group">
+      <div class="srow">Weight units
+        <div class="seg" role="group" aria-label="Weight units"><button data-unit="lb">lb</button><button data-unit="kg">kg</button></div>
+      </div>
+      <label class="srow"><span>Day starts at<br><small>For late-night eating</small></span>
+        <select class="field" id="set-daystart">
+          <option value="0">12:00 AM</option><option value="1">1:00 AM</option><option value="2">2:00 AM</option><option value="3">3:00 AM</option><option value="4">4:00 AM</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="group-label">Your data</div>
+    <div class="group">
+      <button class="srow" id="export-btn">Export to CSV <small id="last-export"></small></button>
+      <button class="srow" id="import-btn">Import from CSV <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--muted)"><path d="M9 6l6 6-6 6"/></svg></button>
+      <input type="file" id="import-file" accept=".csv,text/csv" hidden>
+    </div>
+    <p class="group-hint">Everything stays on this phone. Export now and then as a backup.</p>
+    <p class="group-hint" style="margin-top:24px">Version <span id="version"></span></p>
+  </main>
+
+  <nav class="tabs" aria-label="Sections">
+    <button data-view="day" aria-current="page"><span class="pill"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 8 8" stroke-linecap="round"/></svg></span><span id="nav-day-label">Today</span></button>
+    <button data-view="trends"><span class="pill"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-6"/></svg></span>Trends</button>
+    <button data-view="settings"><span class="pill"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></span>Settings</button>
+  </nav>
+</div>
+
+<div id="scrim"></div>
+
+<!-- ADD SHEET -->
+<section class="sheet" id="add-sheet" role="dialog" aria-modal="true" aria-labelledby="add-h">
+  <div class="grab"></div>
+  <div class="sheet-head"><h2 id="add-h">Add calories</h2><span id="add-when"></span></div>
+  <div class="amount" aria-live="polite"><b id="amount">0</b><span>kcal</span></div>
+  <div class="after" id="after"></div>
+  <label class="lbl">Label (optional)<input class="field" id="add-label-input" maxlength="40" placeholder="e.g. dinner" autocomplete="off" enterkeyhint="done"></label>
+  <div class="keypad" id="keypad">
+    <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+    <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+    <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+    <button data-k="neg" aria-label="Make negative" aria-pressed="false">−</button><button data-k="0">0</button>
+    <button data-k="del" aria-label="Delete digit"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11v12H9l-5-6z"/><path d="M13 10l4 4M17 10l-4 4"/></svg></button>
+  </div>
+  <button class="primary" id="add-confirm" disabled>Add</button>
+</section>
+
+<!-- WEIGHT SHEET -->
+<section class="sheet" id="weight-sheet" role="dialog" aria-modal="true" aria-labelledby="wt-h">
+  <div class="grab"></div>
+  <div class="sheet-head"><h2 id="wt-h">Log weight</h2><span id="wt-when"></span></div>
+  <label class="lbl">Weight (<span id="wt-unit">lb</span>)<input class="field" id="wt-input" inputmode="decimal" autocomplete="off" enterkeyhint="done" style="font-size:24px;height:56px;font-weight:600"></label>
+  <p class="hint" id="wt-error" hidden></p>
+  <div class="row-actions"><button class="text-btn danger" id="wt-remove" hidden>Remove</button><button class="primary" id="wt-save" style="flex:1">Save</button></div>
+</section>
+
+<!-- SETUP SHEET -->
+<section class="sheet" id="setup-sheet" role="dialog" aria-modal="true" aria-labelledby="setup-h">
+  <div class="sheet-head"><h2 id="setup-h">Set your goal</h2></div>
+  <p class="hint">You can change these any time in Settings.</p>
+  <label class="lbl">Daily calorie goal<input class="field" id="setup-goal" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 2000" autocomplete="off"></label>
+  <div class="srow" style="padding:0">Weight units<div class="seg" role="group" aria-label="Weight units" id="setup-units"><button data-unit="lb" aria-pressed="true">lb</button><button data-unit="kg" aria-pressed="false">kg</button></div></div>
+  <label class="lbl">Target weight (optional)<input class="field" id="setup-target" inputmode="decimal" autocomplete="off"></label>
+  <p class="hint" id="setup-error" hidden></p>
+  <button class="primary" id="setup-start">Start tracking</button>
+</section>
+
+<div id="toast" role="status"><span id="toast-msg"></span><button id="toast-undo">Undo</button></div>
+
+<script src="app.js"></script>
+</body>
+</html>
