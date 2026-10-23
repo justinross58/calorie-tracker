@@ -21,4 +21,5 @@ Phones pick up the new version the next time the app is opened with a connection
 - `index.html`, `style.css`, `app.js` — the app (no frameworks, no build step)
 - `sw.js` — offline caching
 - `manifest.webmanifest`, `*.png` — install name and icons
+- AI estimates call Claude (Haiku 5.5) directly from the phone with your own API key, set in Settings.
 - `*.woff2`, `OFL-*.txt` — Outfit and Figtree (SIL Open Font License)

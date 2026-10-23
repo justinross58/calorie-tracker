@@ -189,3 +189,25 @@ nav.tabs button[aria-current="page"] .pill { background: var(--accent-soft); }
 #toast span { flex: 1; }
 #toast button { height: 36px; padding: 0 14px; border: none; border-radius: 18px; background: none; color: var(--accent-soft); font-weight: 600; }
 @media (prefers-color-scheme: dark) { #toast button { color: var(--accent); } }
+
+/* AI describe */
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.seg.full button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 38px; }
+.field.area { height: auto; padding: 10px 12px; resize: none; line-height: 1.4; font-family: var(--body); width: 100%; }
+.primary.soft { background: var(--accent-tint); color: var(--accent); height: 52px; font-size: 17px; }
+.hint.err { color: var(--warn); }
+.ai-msg { background: var(--accent-tint); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; font-size: 14px; }
+.ai-msg .chip { background: var(--card); }
+.ai-items { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 14px; }
+.ai-items li { display: flex; align-items: center; gap: 8px; padding: 6px 4px 6px 8px; }
+.ai-items li + li { border-top: 1px solid var(--line); }
+.ai-items .field { height: 40px; font-size: 15px; }
+.ai-items .name { flex: 1; border-color: transparent; background: none; padding: 0 6px; }
+.ai-items .name:focus { border-color: var(--border); background: var(--field); }
+.ai-items .kc { width: 76px; text-align: right; font-weight: 600; padding: 0 10px; }
+.ai-items .icon-btn { width: 40px; height: 40px; color: var(--faint); flex: none; }
+.ai-total { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px; font-size: 15px; color: var(--muted); }
+.ai-total b { font-family: var(--display); font-weight: 700; font-size: 24px; color: var(--ink); }
+.ai-note { font-size: 13px; color: var(--muted); padding: 0 4px; margin: -6px 0 0; }
+.srow .field.key { width: 150px; text-align: left; font-weight: 400; }
+.srow.danger-row { color: var(--warn); font-weight: 600; }

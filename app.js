@@ -1,6 +1,7 @@
 'use strict';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
+const AI_MODEL = 'claude-haiku-5-5';
 const KG_PER_LB = 0.45359237;
 const RING_C = 2 * Math.PI * 110; // ring circumference in the 260x260 viewBox
 
@@ -54,7 +55,7 @@ const db = {
 function readSettings() {
   try { return JSON.parse(localStorage.getItem('ct.settings')) || {}; } catch { return {}; }
 }
-const settings = Object.assign({ units: 'lb', dayStart: 0, lastExport: null, snoozeUntil: null }, readSettings());
+const settings = Object.assign({ units: 'lb', dayStart: 0, lastExport: null, snoozeUntil: null, apiKey: '', addMode: 'keypad' }, readSettings());
 function saveSettings() {
   try { localStorage.setItem('ct.settings', JSON.stringify(settings)); } catch { /* storage blocked */ }
 }
@@ -125,16 +126,27 @@ const fromUnit = v => (settings.units === 'kg' ? v / KG_PER_LB : v);
 const fmtW = lb => toUnit(lb).toFixed(1);
 const parseNum = s => parseFloat(String(s).trim().replace(',', '.').replace('−', '-'));
 
-async function addEntry(day, kcal, label) {
+async function addEntries(day, items) {
   const isToday = day === todayKey();
-  const e = { day, ts: isToday ? Date.now() : dateOf(day).getTime(), kcal, label: label || '' };
-  if (!isToday) e.timed = false;
-  e.id = await db.put('entries', e);
-  S.entries.push(e);
+  const ts = isToday ? Date.now() : dateOf(day).getTime();
+  const added = [];
+  for (const it of items) {
+    const e = { day, ts, kcal: it.kcal, label: it.label || '' };
+    if (!isToday) e.timed = false;
+    e.id = await db.put('entries', e);
+    S.entries.push(e);
+    added.push(e);
+  }
   requestPersist();
   render();
-  toast(`Added ${kcal < 0 ? '−' : ''}${fmt(Math.abs(kcal))}${isToday ? '' : ' to ' + fmtShort(day)}`, () => removeEntry(e.id, true));
+  const total = added.reduce((s, e) => s + e.kcal, 0);
+  const what = `${total < 0 ? '−' : ''}${fmt(Math.abs(total))}${added.length > 1 ? ` (${added.length} items)` : ''}`;
+  toast(`Added ${what}${isToday ? '' : ' to ' + fmtShort(day)}`, async () => {
+    for (const e of added) await removeEntry(e.id, true);
+  });
 }
+
+const addEntry = (day, kcal, label) => addEntries(day, [{ kcal, label }]);
 
 async function removeEntry(id, silent) {
   const i = S.entries.findIndex(e => e.id === id);
@@ -284,6 +296,7 @@ let openSheetEl = null;
 function showSheet(el, pushHistory = true) {
   if (openSheetEl) hideSheet();
   openSheetEl = el;
+  $('toast').classList.remove('show');
   el.classList.add('show');
   $('scrim').classList.add('show');
   if (pushHistory) history.pushState({ sheet: true }, '');
@@ -311,7 +324,201 @@ function openAdd() {
   $('add-label-input').value = '';
   $('add-when').textContent = S.day === todayKey() ? 'Today · now' : fmtDay(S.day);
   renderAdd();
+  resetAI();
+  setAddMode(settings.addMode, false);
   showSheet($('add-sheet'));
+}
+
+function setAddMode(mode, remember = true) {
+  if (remember && settings.addMode !== mode) { settings.addMode = mode; saveSettings(); }
+  paintSeg($('add-mode'), 'mode', mode);
+  $('mode-keypad').hidden = mode !== 'keypad';
+  $('mode-describe').hidden = mode !== 'describe';
+  if (mode === 'describe') {
+    const hasKey = !!settings.apiKey;
+    $('ai-nokey').hidden = hasKey;
+    $('ai-form').hidden = !hasKey;
+    if (hasKey && !ai.items.length) setTimeout(() => $('ai-text').focus(), 250);
+  }
+}
+
+/* AI estimate (Claude) */
+
+const ai = { items: [], busy: false };
+
+function resetAI() {
+  ai.items = [];
+  ai.busy = false;
+  $('ai-text').value = '';
+  $('ai-results').hidden = true;
+  setAIStatus('');
+  $('ai-go').disabled = false;
+  $('ai-go').textContent = 'Estimate calories';
+}
+
+function setAIStatus(msg, isErr) {
+  const el = $('ai-status');
+  el.hidden = !msg;
+  el.textContent = msg || '';
+  el.classList.toggle('err', !!isErr);
+}
+
+const AI_SYSTEM = `You estimate calories for food a person says they ate, for a personal calorie log.
+Split the description into separate foods or drinks. Use the quantities and serving sizes given. When a size is missing, assume one typical US serving and say what you assumed in the portion.
+Count added fats, sauces, dressings, milk and sugar in drinks when they are mentioned. Use typical home or restaurant preparation unless told otherwise.
+Give realistic, typical values rounded to the nearest 5 kcal. name: the food, at most 24 characters. portion: the amount, at most 22 characters.
+If the text is not about food or drink, return no items and explain briefly in note. Always answer by calling record_foods.`;
+
+const AI_TOOL = {
+  name: 'record_foods',
+  description: 'Record the estimated calories for each food or drink eaten.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Food or drink, e.g. "Scrambled eggs"' },
+            portion: { type: 'string', description: 'Amount, e.g. "2 large"' },
+            kcal: { type: 'integer', description: 'Estimated calories for this portion' }
+          },
+          required: ['name', 'portion', 'kcal']
+        }
+      },
+      note: { type: 'string', description: 'Optional short note, e.g. why nothing was found' }
+    },
+    required: ['items']
+  }
+};
+
+async function callClaude(body, signal) {
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': settings.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify(body)
+    });
+  } catch (err) {
+    if (err && err.name === 'AbortError') throw new Error('Claude took too long to answer. Try again.');
+    throw new Error(navigator.onLine === false ? 'You’re offline. Use the keypad, or try again when you have a connection.' : 'Couldn’t reach Claude. Check your connection and try again.');
+  }
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  if (!res.ok) {
+    const type = data && data.error && data.error.type;
+    const msg = (data && data.error && data.error.message) || '';
+    if (res.status === 401 || type === 'authentication_error') throw new Error('Your API key wasn’t accepted. Check it in Settings.');
+    if (res.status === 403 || type === 'permission_error') throw new Error('Your API key doesn’t have permission to use this model.');
+    if (/credit balance|billing/i.test(msg)) throw new Error('Your Anthropic account is out of credit. Add credit at console.anthropic.com.');
+    if (res.status === 429 || type === 'rate_limit_error') throw new Error('Too many requests just now. Wait a moment and try again.');
+    if (res.status === 529 || res.status >= 500 || type === 'overloaded_error') throw new Error('Claude is busy right now. Try again in a moment.');
+    if (type === 'not_found_error') throw new Error('The AI model isn’t available to your key.');
+    throw new Error(msg ? `Claude returned an error: ${msg}` : `Claude returned an error (${res.status}).`);
+  }
+  return data;
+}
+
+async function estimate() {
+  const text = $('ai-text').value.trim();
+  if (!text || ai.busy) { if (!text) $('ai-text').focus(); return; }
+  if (!settings.apiKey) { setAddMode('describe'); return; }
+  ai.busy = true;
+  $('ai-go').disabled = true;
+  $('ai-go').textContent = 'Estimating…';
+  setAIStatus('');
+  $('ai-text').blur();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 30000);
+  try {
+    const data = await callClaude({
+      model: AI_MODEL,
+      max_tokens: 1024,
+      system: AI_SYSTEM,
+      tools: [AI_TOOL],
+      tool_choice: { type: 'tool', name: 'record_foods' },
+      messages: [{ role: 'user', content: text }]
+    }, ctl.signal);
+    const use = (data.content || []).find(c => c.type === 'tool_use');
+    const out = (use && use.input) || {};
+    const items = (Array.isArray(out.items) ? out.items : [])
+      .map(it => ({
+        label: [String(it.name || 'Food').trim(), String(it.portion || '').trim()].filter(Boolean).join(', ').slice(0, 40),
+        kcal: Math.max(0, Math.round(Number(it.kcal) || 0))
+      }))
+      .filter(it => it.label);
+    if (!items.length) {
+      setAIStatus(out.note || 'Claude couldn’t find any food in that. Try describing what you ate and how much.', true);
+      $('ai-results').hidden = true;
+      ai.items = [];
+    } else {
+      ai.items = items;
+      renderAIItems();
+      $('ai-results').hidden = false;
+      setAIStatus(out.note || '');
+      $('ai-add').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  } catch (err) {
+    setAIStatus(err.message, true);
+  } finally {
+    clearTimeout(timer);
+    ai.busy = false;
+    $('ai-go').disabled = false;
+    $('ai-go').textContent = ai.items.length ? 'Estimate again' : 'Estimate calories';
+  }
+}
+
+const X_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
+function renderAIItems() {
+  $('ai-items').innerHTML = ai.items.map((it, i) =>
+    `<li data-i="${i}"><input class="field name" value="${esc(it.label)}" maxlength="40" aria-label="Food" autocomplete="off">` +
+    `<input class="field kc" value="${it.kcal}" inputmode="numeric" aria-label="Calories" autocomplete="off">` +
+    `<button class="icon-btn" data-rm="${i}" aria-label="Remove ${esc(it.label)}">${X_ICON}</button></li>`).join('');
+  renderAITotal();
+}
+
+function renderAITotal() {
+  const total = ai.items.reduce((s, it) => s + it.kcal, 0);
+  $('ai-total').textContent = fmt(total);
+  const left = goalFor(S.day).kcal - eatenOn(S.day) - total;
+  const when = S.day === todayKey() ? 'today' : fmtShort(S.day);
+  const a = $('ai-after');
+  if (left >= 0) { a.className = 'after'; a.innerHTML = `Leaves <strong>${fmt(left)}</strong> for ${when}`; }
+  else { a.className = 'after over'; a.innerHTML = `Puts you <strong>${fmt(-left)}</strong> over for ${when}`; }
+  const n = ai.items.filter(it => it.kcal > 0).length;
+  $('ai-add').disabled = n === 0;
+  $('ai-add').textContent = n === 0 ? 'Add' : n === 1 ? `Add ${fmt(total)}` : `Add ${n} items · ${fmt(total)}`;
+}
+
+function confirmAI() {
+  const items = ai.items
+    .map(it => ({ label: it.label.trim(), kcal: Math.min(20000, it.kcal) }))
+    .filter(it => it.kcal > 0);
+  if (!items.length) return;
+  closeSheet();
+  addEntries(S.day, items);
+}
+
+async function testKey() {
+  const r = $('key-test-result');
+  r.textContent = 'Testing…';
+  try {
+    await callClaude({ model: AI_MODEL, max_tokens: 1, messages: [{ role: 'user', content: 'Hi' }] });
+    r.textContent = 'Working';
+    toast('Your key works');
+  } catch (err) {
+    r.textContent = 'Failed';
+    toast(err.message);
+  }
 }
 
 function renderAdd() {
@@ -562,6 +769,11 @@ function renderSettings() {
   $('set-daystart').value = String(settings.dayStart);
   $('last-export').textContent = settings.lastExport ? 'Last: ' + new Date(settings.lastExport).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Never';
   $('version').textContent = VERSION;
+  const k = settings.apiKey;
+  $('key-status').textContent = k ? `Saved · ends …${k.slice(-4)}` : 'Not set';
+  $('set-key').placeholder = k ? '••••••••' : 'Paste key';
+  $('key-test').hidden = !k;
+  $('key-remove').hidden = !k;
 }
 
 /* CSV export / import */
@@ -736,8 +948,27 @@ function bind() {
   $('keypad').onclick = e => { const b = e.target.closest('[data-k]'); if (b) pressKey(b.dataset.k); };
   $('add-confirm').onclick = confirmAdd;
   $('add-label-input').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); confirmAdd(); } };
+  $('add-mode').onclick = e => { const b = e.target.closest('[data-mode]'); if (b) setAddMode(b.dataset.mode); };
+  $('ai-go').onclick = estimate;
+  $('ai-text').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); estimate(); } };
+  $('ai-add').onclick = confirmAI;
+  $('ai-setup').onclick = () => { closeSheet(); showView('settings'); setTimeout(() => $('set-key').focus(), 300); };
+  $('ai-items').oninput = e => {
+    const li = e.target.closest('[data-i]');
+    if (!li) return;
+    const it = ai.items[Number(li.dataset.i)];
+    if (e.target.classList.contains('kc')) { it.kcal = Math.max(0, Math.round(parseNum(e.target.value)) || 0); renderAITotal(); }
+    else it.label = e.target.value;
+  };
+  $('ai-items').onclick = e => {
+    const b = e.target.closest('[data-rm]');
+    if (!b) return;
+    ai.items.splice(Number(b.dataset.rm), 1);
+    if (!ai.items.length) { $('ai-results').hidden = true; $('ai-go').textContent = 'Estimate calories'; }
+    else renderAIItems();
+  };
   document.addEventListener('keydown', e => {
-    if (openSheetEl !== $('add-sheet') || e.target === $('add-label-input')) return;
+    if (openSheetEl !== $('add-sheet') || settings.addMode !== 'keypad' || /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
     if (/^\d$/.test(e.key)) pressKey(e.key);
     else if (e.key === 'Backspace') pressKey('del');
     else if (e.key === '-') pressKey('neg');
@@ -800,6 +1031,27 @@ function bind() {
     S.day = todayKey();
     S.lastToday = S.day;
     toast('Day start updated');
+  };
+  $('set-key').onchange = e => {
+    const v = e.target.value.trim().replace(/\s+/g, '');
+    e.target.value = '';
+    if (!v) return;
+    if (!/^sk-ant-/.test(v)) { toast('That doesn’t look like a Claude API key (they start with sk-ant-)'); return; }
+    settings.apiKey = v;
+    saveSettings();
+    e.target.blur();
+    renderSettings();
+    $('key-test-result').textContent = '';
+    toast('API key saved on this phone');
+  };
+  $('set-key').onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
+  $('key-test').onclick = testKey;
+  $('key-remove').onclick = () => {
+    if (!confirm('Remove your Claude API key from this phone?')) return;
+    settings.apiKey = '';
+    saveSettings();
+    renderSettings();
+    toast('API key removed');
   };
   $('export-btn').onclick = exportCSV;
   $('import-btn').onclick = () => $('import-file').click();

@@ -94,6 +94,14 @@
       <input type="file" id="import-file" accept=".csv,text/csv" hidden>
     </div>
     <p class="group-hint">Everything stays on this phone. Export now and then as a backup.</p>
+
+    <div class="group-label">AI estimates</div>
+    <div class="group">
+      <label class="srow"><span>Claude API key<br><small id="key-status">Not set</small></span><input class="field key" id="set-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste key"></label>
+      <button class="srow" id="key-test" hidden>Test key <small id="key-test-result"></small></button>
+      <button class="srow danger-row" id="key-remove" hidden>Remove key</button>
+    </div>
+    <p class="group-hint">Create a key at console.anthropic.com. It's stored only on this phone. Only the food descriptions you type are sent to Anthropic.</p>
     <p class="group-hint" style="margin-top:24px">Version <span id="version"></span></p>
   </main>
 
@@ -110,6 +118,31 @@
 <section class="sheet" id="add-sheet" role="dialog" aria-modal="true" aria-labelledby="add-h">
   <div class="grab"></div>
   <div class="sheet-head"><h2 id="add-h">Add calories</h2><span id="add-when"></span></div>
+  <div class="seg full" role="group" aria-label="Entry method" id="add-mode">
+    <button data-mode="keypad" aria-pressed="true">Keypad</button>
+    <button data-mode="describe" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Describe</button>
+  </div>
+
+  <div class="stack" id="mode-describe" hidden>
+    <div class="ai-msg" id="ai-nokey" hidden>
+      <span>To estimate calories from a description, add your Claude API key in Settings.</span>
+      <button class="chip" id="ai-setup">Open Settings</button>
+    </div>
+    <div class="stack" id="ai-form">
+      <label class="lbl">What did you eat?<textarea class="field area" id="ai-text" rows="3" maxlength="500" placeholder="e.g. 2 eggs, 1 slice of toast with butter, coffee with milk" enterkeyhint="send"></textarea></label>
+      <button class="primary soft" id="ai-go">Estimate calories</button>
+      <p class="hint" id="ai-status" role="status" hidden></p>
+      <div class="stack" id="ai-results" hidden>
+        <ul class="ai-items" id="ai-items" aria-label="Estimated foods"></ul>
+        <div class="ai-total"><span>Total</span><b id="ai-total">0</b></div>
+        <div class="after" id="ai-after"></div>
+        <button class="primary" id="ai-add">Add</button>
+        <p class="hint">Estimates from Claude. Check the numbers and edit any that look off.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="stack" id="mode-keypad">
   <div class="amount" aria-live="polite"><b id="amount">0</b><span>kcal</span></div>
   <div class="after" id="after"></div>
   <label class="lbl">Label (optional)<input class="field" id="add-label-input" maxlength="40" placeholder="e.g. dinner" autocomplete="off" enterkeyhint="done"></label>
@@ -121,6 +154,7 @@
     <button data-k="del" aria-label="Delete digit"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11v12H9l-5-6z"/><path d="M13 10l4 4M17 10l-4 4"/></svg></button>
   </div>
   <button class="primary" id="add-confirm" disabled>Add</button>
+  </div>
 </section>
 
 <!-- WEIGHT SHEET -->
