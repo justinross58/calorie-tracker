@@ -222,3 +222,12 @@ nav.tabs button[aria-current="page"] .pill { background: var(--accent-soft); }
 .chart .maint { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 1 4; stroke-linecap: round; fill: none; }
 .legend i.gline { height: 0; width: 14px; border-top: 1.5px dashed var(--ink); border-radius: 0; }
 .legend i.mline { height: 0; width: 14px; border-top: 2px dotted var(--muted); border-radius: 0; }
+
+/* Cumulative view */
+.seg.mini { margin-top: 12px; }
+.seg.mini button { flex: 1; height: 32px; font-size: 13px; }
+.chart .zero { stroke: var(--ink); stroke-width: 1; opacity: .55; }
+.chart .cg { stroke: var(--accent); stroke-width: 2.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.chart .cm { stroke: var(--muted); stroke-width: 2; stroke-dasharray: 1 4; stroke-linecap: round; fill: none; }
+.chart .cum-area { fill: var(--accent); opacity: .1; }
+.chart .cum-area.over { fill: var(--warn); }

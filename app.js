@@ -1,6 +1,6 @@
 'use strict';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const AI_MODEL = 'claude-haiku-5-5';
 const KG_PER_LB = 0.45359237;
 const RING_C = 2 * Math.PI * 110; // ring circumference in the 260x260 viewBox
@@ -668,6 +668,10 @@ function caloriesCard() {
       : `<p class="pace">At that pace: about <strong>${perWeek.toFixed(1)} ${settings.units}</strong> ${netAvg < 0 ? 'lost' : 'gained'} per week.</p>`;
   }
   const hasM = vals.some(x => x.m);
+  const view = settings.calView === 'cum' ? 'cum' : 'daily';
+  const head = `<div class="tcard-head"><span>Last ${n} days</span>${ranges('cal', [[14, '14d'], [30, '30d'], [90, '90d']], n)}</div>
+    <div class="seg mini" role="group" aria-label="Chart view"><button data-cview="daily" aria-pressed="${view === 'daily'}">Daily</button><button data-cview="cum" aria-pressed="${view === 'cum'}">Cumulative</button></div>`;
+  if (view === 'cum') return cumulativeCard(n, days, vals, t, head);
 
   const top = Math.ceil(Math.max(...vals.map(x => Math.max(x.v, x.g, x.m || 0))) * 1.08 / 500) * 500;
   const y = v => CH - (v / top) * CH;
@@ -699,7 +703,7 @@ function caloriesCard() {
   </svg>`;
 
   return `<section class="tcard">
-    <div class="tcard-head"><span>Last ${n} days</span>${ranges('cal', [[14, '14d'], [30, '30d'], [90, '90d']], n)}</div>
+    ${head}
     <div class="stats">
       <div class="stat"><b>${avg == null ? '—' : fmt(avg)}</b><span>avg per logged day</span></div>
       <div class="stat"><b>${past.length ? `${onGoal} <small>of ${past.length}</small>` : '—'}</b><span>days at or under goal</span></div>
@@ -709,6 +713,83 @@ function caloriesCard() {
     ${svg}
     <div class="legend"><span><i class="a"></i>At or under</span><span><i class="o"></i>Over goal</span><span><i class="t"></i>Today so far</span><span><i class="gline"></i>Goal</span>${hasM ? '<span><i class="mline"></i>Break-even</span>' : ''}</div>
     <p class="hint" style="margin-top:8px">Tap a day to open it.</p>
+  </section>`;
+}
+
+// Running balance over the period: how far over (+) or under (−) goal and break-even,
+// adding up finished days that have something logged. Today and blank days don't count.
+function cumulativeCard(n, days, vals, t, head) {
+  const signed = v => (v < -0.5 ? '−' : v > 0.5 ? '+' : '') + fmt(Math.abs(v));
+  let eaten = 0, logged = 0, bg = 0, bm = 0, mDays = 0;
+  const pts = [{ g: 0, m: 0 }];
+  for (const x of vals) {
+    if (x.d !== t && x.v > 0) {
+      eaten += x.v; logged++; bg += x.v - x.g;
+      if (x.m) { bm += x.v - x.m; mDays++; }
+    }
+    pts.push({ g: bg, m: bm });
+  }
+  if (!logged) {
+    return `<section class="tcard">${head}<p class="note">Log a few days to see your running total.</p></section>`;
+  }
+  const showM = mDays > 0;
+
+  const all = pts.flatMap(p => (showM ? [p.g, p.m] : [p.g]));
+  let lo = Math.min(0, ...all), hi = Math.max(0, ...all);
+  const pad = Math.max(150, (hi - lo) * 0.12);
+  lo -= lo < 0 ? pad : 0; hi += hi > 0 ? pad : 0;
+  if (hi - lo < 400) { hi += 200; lo -= 200; }
+  const Y = v => CH - ((v - lo) / (hi - lo)) * CH;
+  const step = CW / n;
+  const line = key => pts.map((p, k) => `${k ? 'L' : 'M'}${(k * step).toFixed(1)} ${Y(p[key]).toFixed(1)}`).join('');
+  const zeroY = Y(0);
+  const area = `${line('g')}L${CW} ${zeroY.toFixed(1)}L0 ${zeroY.toFixed(1)}Z`;
+  // Shade under the zero line green and over it orange, even when the line crosses zero
+  const z = zeroY.toFixed(1);
+  const shade = `<defs><clipPath id="cum-over"><rect x="0" y="-24" width="${CW}" height="${(zeroY + 24).toFixed(1)}"/></clipPath>` +
+    `<clipPath id="cum-under"><rect x="0" y="${z}" width="${CW}" height="${(CH - zeroY + 26).toFixed(1)}"/></clipPath></defs>` +
+    `<path class="cum-area over" clip-path="url(#cum-over)" d="${area}"/><path class="cum-area" clip-path="url(#cum-under)" d="${area}"/>`;
+
+  let hits = '';
+  vals.forEach((x, i) => {
+    const p = pts[i + 1];
+    const tip = x.d === t ? 'today (not counted yet)' : x.v > 0 ? `running ${signed(p.g)} vs goal` + (showM ? `, ${signed(p.m)} vs break-even` : '') : 'nothing logged';
+    hits += `<rect class="hit" data-day="${x.d}" x="${(i * step).toFixed(1)}" y="-24" width="${step.toFixed(1)}" height="${CH + 48}"><title>${fmtShort(x.d)}: ${tip}</title></rect>`;
+  });
+
+  const mid = days[Math.floor(n / 2)];
+  const midX = (Math.floor(n / 2) + 0.5) * step;
+  const svg = `<svg class="chart" viewBox="0 -24 ${CW} ${CH + 50}" role="img" aria-label="Running calorie balance over the last ${n} days: ${signed(bg)} versus goal${showM ? `, ${signed(bm)} versus break-even` : ''}">
+    ${shade}
+    <line class="zero" x1="0" x2="${CW}" y1="${zeroY.toFixed(1)}" y2="${zeroY.toFixed(1)}"/>
+    ${hi > 0 ? `<text x="${CW}" y="${(Y(hi) + 12).toFixed(1)}" text-anchor="end">Over ↑</text>` : ''}
+    ${lo < 0 ? `<text x="${CW}" y="${(Y(lo) - 4).toFixed(1)}" text-anchor="end">Under ↓</text>` : ''}
+    ${showM ? `<path class="cm" d="${line('m')}"/>` : ''}
+    <path class="cg" d="${line('g')}"/>
+    <text x="0" y="-10">Running balance, kcal</text>
+    <text x="0" y="${CH + 20}">${fmtShort(days[0])}</text>
+    <text x="${midX.toFixed(1)}" y="${CH + 20}" text-anchor="middle">${fmtShort(mid)}</text>
+    <text x="${CW}" y="${CH + 20}" text-anchor="end">Today</text>
+    ${hits}
+  </svg>`;
+
+  let pace = '';
+  if (showM && Math.abs(bm) >= 100) {
+    const amt = Math.abs(bm) / (settings.units === 'kg' ? 7700 : 3500);
+    pace = `<p class="pace">That's roughly <strong>${amt.toFixed(1)} ${settings.units}</strong> ${bm < 0 ? 'lost' : 'gained'} over this period (estimate).</p>`;
+  }
+
+  return `<section class="tcard">
+    ${head}
+    <div class="stats">
+      <div class="stat"><b>${fmt(eaten)}</b><span>eaten over ${logged} day${logged === 1 ? '' : 's'}</span></div>
+      <div class="stat"><b class="${bg <= 0 ? 'good' : 'warnc'}">${signed(bg)}</b><span>vs goal</span></div>
+      ${showM ? `<div class="stat"><b class="${bm <= 0 ? 'good' : 'warnc'}">${signed(bm)}</b><span>vs break-even</span></div>` : ''}
+    </div>
+    ${pace}
+    ${svg}
+    <div class="legend"><span><i class="line"></i>vs goal</span>${showM ? '<span><i class="mline"></i>vs break-even</span>' : ''}</div>
+    <p class="hint" style="margin-top:8px">Adds up finished days you logged. Below the line means under. Tap a day to open it.</p>
   </section>`;
 }
 
@@ -1021,6 +1102,8 @@ function bind() {
   $('trend-body').onclick = e => {
     const hit = e.target.closest('[data-day]');
     if (hit) { goToDay(hit.dataset.day); return; }
+    const cv = e.target.closest('[data-cview]');
+    if (cv) { settings.calView = cv.dataset.cview; saveSettings(); renderTrends(); return; }
     const c = e.target.closest('[data-cal]');
     if (c) { S.calRange = Number(c.dataset.cal); renderTrends(); return; }
     const w = e.target.closest('[data-wt]');
