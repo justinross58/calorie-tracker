@@ -211,3 +211,14 @@ nav.tabs button[aria-current="page"] .pill { background: var(--accent-soft); }
 .ai-note { font-size: 13px; color: var(--muted); padding: 0 4px; margin: -6px 0 0; }
 .srow .field.key { width: 150px; text-align: left; font-weight: 400; }
 .srow.danger-row { color: var(--warn); font-weight: 600; }
+
+/* Break-even */
+.net { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.net strong { color: var(--accent); font-weight: 600; }
+.net.over strong { color: var(--warn); }
+.stat b.warnc { color: var(--warn); }
+.pace { font-size: 13px; color: var(--muted); margin: -4px 0 10px; }
+.pace strong { color: var(--ink); }
+.chart .maint { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 1 4; stroke-linecap: round; fill: none; }
+.legend i.gline { height: 0; width: 14px; border-top: 1.5px dashed var(--ink); border-radius: 0; }
+.legend i.mline { height: 0; width: 14px; border-top: 2px dotted var(--muted); border-radius: 0; }

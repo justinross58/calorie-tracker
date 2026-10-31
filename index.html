@@ -35,6 +35,7 @@
         <div class="ring-center"><div class="ring-num" id="ring-num">0</div><div class="ring-label" id="ring-label">calories left</div></div>
       </div>
       <div class="totals"><span><strong id="eaten">0</strong> eaten</span><span><strong id="goal">0</strong> goal</span></div>
+      <div class="net" id="net" hidden></div>
     </section>
 
     <div class="banner" id="backup-banner" hidden>
@@ -71,9 +72,10 @@
     <div class="group-label">Goals</div>
     <div class="group">
       <label class="srow">Daily calorie goal <input class="field" id="set-goal" inputmode="numeric" pattern="[0-9]*" autocomplete="off"></label>
+      <label class="srow"><span>Break-even calories<br><small>What you burn in a typical day</small></span><input class="field" id="set-maint" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="—"></label>
       <label class="srow"><span>Target weight</span><input class="field" id="set-target" inputmode="decimal" autocomplete="off" placeholder="—"></label>
     </div>
-    <p class="group-hint">A new goal applies from today on; past days keep theirs.</p>
+    <p class="group-hint">Changes apply from today on; past days keep their numbers.</p>
 
     <div class="group-label">Preferences</div>
     <div class="group">

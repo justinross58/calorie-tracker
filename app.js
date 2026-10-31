@@ -1,6 +1,6 @@
 'use strict';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const AI_MODEL = 'claude-haiku-5-5';
 const KG_PER_LB = 0.45359237;
 const RING_C = 2 * Math.PI * 110; // ring circumference in the 260x260 viewBox
@@ -244,6 +244,13 @@ function renderDay() {
   fg.style.opacity = eaten > 0 ? 1 : 0;
   $('eaten').textContent = fmt(eaten);
   $('goal').textContent = fmt(goal);
+  const maint = goalFor(d).maint, net = $('net');
+  net.hidden = !maint;
+  if (maint) {
+    const diff = maint - eaten;
+    net.className = diff < 0 ? 'net over' : 'net';
+    net.innerHTML = `<strong>${fmt(Math.abs(diff))}</strong> ${diff < 0 ? 'over' : 'under'} break-even of ${fmt(maint)}`;
+  }
 
   $('backup-banner').hidden = !needsBackup();
 
@@ -642,16 +649,30 @@ function caloriesCard() {
   for (let i = n - 1; i >= 0; i--) days.push(addDays(t, -i));
   const sums = new Map();
   for (const e of S.entries) sums.set(e.day, (sums.get(e.day) || 0) + e.kcal);
-  const vals = days.map(d => ({ d, v: Math.max(0, sums.get(d) || 0), g: goalFor(d).kcal }));
+  const vals = days.map(d => { const g = goalFor(d); return { d, v: Math.max(0, sums.get(d) || 0), g: g.kcal, m: g.maint || null }; });
   const past = vals.filter(x => x.d !== t && x.v > 0);
   const avg = past.length ? past.reduce((s, x) => s + x.v, 0) / past.length : null;
   const onGoal = past.filter(x => x.v <= x.g).length;
   const overDays = vals.filter(x => x.d !== t && x.v > x.g).length;
 
-  const top = Math.ceil(Math.max(...vals.map(x => Math.max(x.v, x.g))) * 1.08 / 500) * 500;
+  // Average daily balance against break-even, over finished days that have one set
+  const withM = past.filter(x => x.m);
+  const netAvg = withM.length ? withM.reduce((s, x) => s + (x.v - x.m), 0) / withM.length : null;
+  let netStat = '', pace = '';
+  if (netAvg != null) {
+    const sign = netAvg < -0.5 ? '−' : netAvg > 0.5 ? '+' : '';
+    netStat = `<div class="stat"><b class="${netAvg <= 0 ? 'good' : 'warnc'}">${sign}${fmt(Math.abs(netAvg))}</b><span>per day vs break-even</span></div>`;
+    const perWeek = Math.abs(netAvg) * 7 / (settings.units === 'kg' ? 7700 : 3500);
+    pace = Math.abs(netAvg) < 50
+      ? `<p class="pace">At that pace your weight should hold about steady.</p>`
+      : `<p class="pace">At that pace: about <strong>${perWeek.toFixed(1)} ${settings.units}</strong> ${netAvg < 0 ? 'lost' : 'gained'} per week.</p>`;
+  }
+  const hasM = vals.some(x => x.m);
+
+  const top = Math.ceil(Math.max(...vals.map(x => Math.max(x.v, x.g, x.m || 0))) * 1.08 / 500) * 500;
   const y = v => CH - (v / top) * CH;
   const step = CW / n, bw = Math.max(2, step * 0.64), r = Math.min(4, bw / 2);
-  let bars = '', hits = '', goalPath = '';
+  let bars = '', hits = '', goalPath = '', maintPath = '', pen = false;
   vals.forEach((x, i) => {
     const bx = i * step + (step - bw) / 2;
     if (x.v > 0) {
@@ -660,6 +681,8 @@ function caloriesCard() {
     }
     hits += `<rect class="hit" data-day="${x.d}" x="${(i * step).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${CH + 24}"><title>${fmtShort(x.d)}: ${fmt(x.v)} of ${fmt(x.g)}</title></rect>`;
     goalPath += `${i ? 'L' : 'M'}${(i * step).toFixed(1)} ${y(x.g).toFixed(1)}L${((i + 1) * step).toFixed(1)} ${y(x.g).toFixed(1)}`;
+    if (x.m) { maintPath += `${pen ? 'L' : 'M'}${(i * step).toFixed(1)} ${y(x.m).toFixed(1)}L${((i + 1) * step).toFixed(1)} ${y(x.m).toFixed(1)}`; pen = true; }
+    else pen = false;
   });
   const mid = days[Math.floor(n / 2)];
   const midX = (Math.floor(n / 2) + 0.5) * step;
@@ -667,7 +690,8 @@ function caloriesCard() {
     <line class="axis" x1="0" y1="${CH}" x2="${CW}" y2="${CH}"/>
     ${bars}
     <path class="goal" d="${goalPath}"/>
-    <text x="0" y="-10">Goal ${fmt(currentGoal().kcal)}</text>
+    ${hasM ? `<path class="maint" d="${maintPath}"/>` : ''}
+    <text x="0" y="-10">Goal ${fmt(currentGoal().kcal)}${currentGoal().maint ? ` · Break-even ${fmt(currentGoal().maint)}` : ''}</text>
     <text x="0" y="${CH + 20}">${fmtShort(days[0])}</text>
     <text x="${midX.toFixed(1)}" y="${CH + 20}" text-anchor="middle">${fmtShort(mid)}</text>
     <text x="${CW}" y="${CH + 20}" text-anchor="end">Today</text>
@@ -679,9 +703,11 @@ function caloriesCard() {
     <div class="stats">
       <div class="stat"><b>${avg == null ? '—' : fmt(avg)}</b><span>avg per logged day</span></div>
       <div class="stat"><b>${past.length ? `${onGoal} <small>of ${past.length}</small>` : '—'}</b><span>days at or under goal</span></div>
+      ${netStat}
     </div>
+    ${pace}
     ${svg}
-    <div class="legend"><span><i class="a"></i>At or under</span><span><i class="o"></i>Over goal</span><span><i class="t"></i>Today so far</span></div>
+    <div class="legend"><span><i class="a"></i>At or under</span><span><i class="o"></i>Over goal</span><span><i class="t"></i>Today so far</span><span><i class="gline"></i>Goal</span>${hasM ? '<span><i class="mline"></i>Break-even</span>' : ''}</div>
     <p class="hint" style="margin-top:8px">Tap a day to open it.</p>
   </section>`;
 }
@@ -762,6 +788,7 @@ function weightCard() {
 function renderSettings() {
   const g = currentGoal();
   if (document.activeElement !== $('set-goal')) $('set-goal').value = g.kcal;
+  if (document.activeElement !== $('set-maint')) $('set-maint').value = g.maint || '';
   if (document.activeElement !== $('set-target')) $('set-target').value = g.target ? `${fmtW(g.target)}` : '';
   $('set-target').setAttribute('aria-label', `Target weight in ${settings.units}`);
   $('set-target').placeholder = settings.units;
@@ -781,8 +808,8 @@ function renderSettings() {
 const csvCell = v => { if (v == null) return ''; const s = String(v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 
 function buildCSV() {
-  const rows = [['type', 'day', 'time', 'kcal', 'label', 'weight_lb', 'goal_kcal', 'target_lb']];
-  for (const g of S.goals) rows.push(['goal', g.from, '', '', '', '', g.kcal, g.target ?? '']);
+  const rows = [['type', 'day', 'time', 'kcal', 'label', 'weight_lb', 'goal_kcal', 'target_lb', 'maint_kcal']];
+  for (const g of S.goals) rows.push(['goal', g.from, '', '', '', '', g.kcal, g.target ?? '', g.maint ?? '']);
   for (const w of [...S.weights.values()].sort((a, b) => (a.day < b.day ? -1 : 1))) rows.push(['weight', w.day, '', '', '', w.lb, '', '']);
   for (const e of [...S.entries].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.ts - b.ts))) {
     rows.push(['entry', e.day, e.timed === false ? '' : new Date(e.ts).toISOString(), e.kcal, e.label, '', '', '']);
@@ -849,7 +876,8 @@ function readExport(text) {
     } else if (type === 'goal') {
       const kcal = parseInt(get(r, 'goal_kcal'), 10);
       const target = parseFloat(get(r, 'target_lb'));
-      if (kcal > 0) data.goals.push({ from: day, kcal, target: Number.isFinite(target) ? target : null });
+      const maint = parseInt(get(r, 'maint_kcal'), 10);
+      if (kcal > 0) data.goals.push({ from: day, kcal, target: Number.isFinite(target) ? target : null, maint: maint > 0 ? maint : null });
     }
   }
   return data;
@@ -1017,7 +1045,21 @@ function bind() {
     renderSettings();
     toast('Target weight updated');
   };
-  [$('set-goal'), $('set-target')].forEach(el => { el.onkeydown = e => { if (e.key === 'Enter') el.blur(); }; });
+  $('set-maint').onchange = async e => {
+    const s = e.target.value.trim();
+    if (!s) { await setGoal({ maint: null }); toast('Break-even cleared'); return; }
+    const v = Math.round(parseNum(s));
+    if (!(v >= 800 && v <= 10000)) { toast('Enter a break-even between 800 and 10,000'); renderSettings(); return; }
+    // The first break-even ever entered also covers earlier days, so history can be compared to it.
+    // Later changes apply from today on, like the calorie goal.
+    const first = !S.goals.some(g => g.maint);
+    if (first) for (const g of S.goals) { g.maint = v; await db.put('goals', g); }
+    await setGoal({ maint: v });
+    e.target.blur();
+    renderSettings();
+    toast(first ? `Break-even set to ${fmt(v)}` : `Break-even set to ${fmt(v)} from today on`);
+  };
+  [$('set-goal'), $('set-maint'), $('set-target')].forEach(el => { el.onkeydown = e => { if (e.key === 'Enter') el.blur(); }; });
   document.querySelector('#view-settings .seg').onclick = e => {
     const b = e.target.closest('[data-unit]');
     if (!b) return;
