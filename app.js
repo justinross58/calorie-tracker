@@ -1,6 +1,6 @@
 'use strict';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const AI_MODEL = 'claude-haiku-5-5';
 const KG_PER_LB = 0.45359237;
 const RING_C = 2 * Math.PI * 110; // ring circumference in the 260x260 viewBox
@@ -837,7 +837,8 @@ function weightCard() {
 
   const avgFor = d => { const win = st.arr.filter(w => w.day <= d && daysBetween(w.day, d) < 7); return win.reduce((s, w) => s + w.lb, 0) / win.length; };
   const avgs = pts.map(p => ({ day: p.day, lb: avgFor(p.day) }));
-  let lo = Math.min(...pts.map(p => p.lb)), hi = Math.max(...pts.map(p => p.lb));
+  const ex = expectedWeight(start, t, avgs[0].lb);
+  let lo = Math.min(...pts.map(p => p.lb), ...(ex ? ex.pts.map(p => p.lb) : [])), hi = Math.max(...pts.map(p => p.lb), ...(ex ? ex.pts.map(p => p.lb) : []));
   const showTarget = st.target && st.target > lo - Math.max(10, hi - lo) && st.target < hi + Math.max(10, hi - lo);
   if (showTarget) { lo = Math.min(lo, st.target); hi = Math.max(hi, st.target); }
   const padLb = Math.max(1, (hi - lo) * 0.12);
@@ -851,16 +852,91 @@ function weightCard() {
   const tgt = showTarget
     ? `<line class="target" x1="0" x2="${CW}" y1="${Y(st.target).toFixed(1)}" y2="${Y(st.target).toFixed(1)}"/><text x="${CW}" y="${(Y(st.target) - 6).toFixed(1)}" text-anchor="end">Target ${fmtW(st.target)}</text>`
     : '';
-  const svg = `<svg class="chart" viewBox="0 -24 ${CW} ${CH + 50}" role="img" aria-label="Weight trend with 7-day average">
+  const exLine = ex ? ex.pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.day).toFixed(1)} ${Y(p.lb).toFixed(1)}`).join('') : '';
+  const svg = `<svg class="chart" viewBox="0 -24 ${CW} ${CH + 50}" role="img" aria-label="Weight trend with 7-day average${ex ? ' and expected weight from calories' : ''}">
     <line class="axis" x1="0" y1="${CH}" x2="${CW}" y2="${CH}"/>
     <text x="0" y="-10">${toUnit(hi).toFixed(0)} ${settings.units}</text>
     ${showTarget && CH - Y(st.target) < 22 ? '' : `<text x="0" y="${CH - 6}">${toUnit(lo).toFixed(0)}</text>`}
-    ${tgt}${dots}<path class="avg" d="${line}"/>
+    ${tgt}${dots}${ex ? `<path class="exp" d="${exLine}"/>` : ''}<path class="avg" d="${line}"/>
     <text x="0" y="${CH + 20}">${fmtShort(start)}</text>
     <text x="${CW}" y="${CH + 20}" text-anchor="end">Today</text>
   </svg>`;
   return `<section class="tcard">${head}${weightStatsHTML(st)}${svg}
-    <div class="legend"><span><i class="dotk"></i>Weigh-in</span><span><i class="line"></i>7-day average</span>${showTarget ? '<span><i class="tline"></i>Target</span>' : ''}</div>
+    <div class="legend"><span><i class="dotk"></i>Weigh-in</span><span><i class="line"></i>7-day average</span>${ex ? '<span><i class="eline"></i>Expected from calories</span>' : ''}${showTarget ? '<span><i class="tline"></i>Target</span>' : ''}</div>
+  </section>
+  ${compareCard(start, pts, avgFor, ex)}`;
+}
+
+const LB_KCAL = 3500;
+const signedW = lb => { const v = toUnit(lb); return (v < -0.05 ? '−' : v > 0.05 ? '+' : '') + Math.abs(v).toFixed(1); };
+
+// Expected weight: start from the 7-day average on the first day, then each finished day
+// moves it by (calories eaten − break-even) ÷ 3,500 per lb. A day's food shows up on the
+// next morning's weigh-in. Days with nothing logged are counted as break-even.
+function expectedWeight(start, t, anchor) {
+  const sums = new Map();
+  for (const e of S.entries) sums.set(e.day, (sums.get(e.day) || 0) + e.kcal);
+  if (!S.goals.some(g => g.maint)) return null;
+  const pts = [{ day: start, lb: anchor }];
+  const at = new Map([[start, anchor]]);
+  let lb = anchor, logged = 0, blank = 0, noM = 0, mSum = 0;
+  for (let d = start; d < t; d = addDays(d, 1)) {
+    const v = sums.get(d) || 0, m = goalFor(d).maint;
+    if (v > 0 && m) { lb += (v - m) / LB_KCAL; logged++; mSum += m; }
+    else if (v > 0) noM++;
+    else blank++;
+    const next = addDays(d, 1);
+    pts.push({ day: next, lb });
+    at.set(next, lb);
+  }
+  return { pts, at, logged, blank, noM, mAvg: logged ? mSum / logged : null };
+}
+
+function compareCard(start, pts, avgFor, ex) {
+  const title = '<div class="tcard-head"><span>Actual vs expected</span></div>';
+  if (!ex) {
+    return `<section class="tcard">${title}<p class="hint" style="margin-top:10px">Set your break-even calories in Settings to compare your weight with what your calories predict.</p></section>`;
+  }
+  if (ex.logged < 3) {
+    return `<section class="tcard">${title}<p class="hint" style="margin-top:10px">Log calories on a few more days in this range to compare.</p></section>`;
+  }
+  const last = pts[pts.length - 1].day;
+  const span = daysBetween(start, last);
+  const actual = avgFor(last) - avgFor(start);
+  const expected = (ex.at.get(last) ?? ex.pts[ex.pts.length - 1].lb) - ex.pts[0].lb;
+  const diff = actual - expected; // + means you weigh more than predicted
+  const u = settings.units;
+  const cls = v => (v <= 0 ? 'good' : 'warnc');
+
+  let verdict;
+  if (span < 10) {
+    verdict = 'Give it about two weeks. Early on, day-to-day water weight swamps the difference.';
+  } else if (Math.abs(diff) < 0.75) {
+    verdict = 'Your weight is tracking close to what your calories predict.';
+  } else {
+    const amt = `${toUnit(Math.abs(diff)).toFixed(1)} ${u}`;
+    // If the real break-even were m', actual = Σ(v − m') / 3,500, so m' − m = (expected − actual) × 3,500 ÷ logged days
+    const implied = Math.round((ex.mAvg + (expected - actual) * LB_KCAL / ex.logged) / 50) * 50;
+    const confident = span >= 14 && ex.logged >= 10 && ex.blank <= span * 0.3;
+    if (diff > 0) {
+      verdict = `You've ${actual < 0 ? 'lost' : 'changed'} ${amt} less than your calories predict. ` +
+        (confident ? `Your real break-even may be closer to <strong>${fmt(implied)}</strong>, or some food may be going unlogged.` : 'Some food may be going unlogged, or your break-even may be set a little high.');
+    } else {
+      verdict = `You've lost ${amt} more than your calories predict. ` +
+        (confident ? `Your real break-even may be closer to <strong>${fmt(implied)}</strong>.` : 'Your break-even may be set a little low.');
+    }
+  }
+  const notes = [];
+  if (ex.blank) notes.push(`${ex.blank} day${ex.blank === 1 ? '' : 's'} with nothing logged ${ex.blank === 1 ? 'was' : 'were'} counted as break-even.`);
+  return `<section class="tcard">${title}
+    <p class="hint" style="margin:6px 0 0">${fmtShort(start)} to ${fmtShort(last)}, using 7-day averages</p>
+    <div class="stats three">
+      <div class="stat"><b class="${cls(actual)}">${signedW(actual)}</b><span>actual, ${u}</span></div>
+      <div class="stat"><b class="exp-c">${signedW(expected)}</b><span>expected, ${u}</span></div>
+      <div class="stat"><b>${signedW(diff)}</b><span>difference</span></div>
+    </div>
+    <p class="pace">${verdict}</p>
+    <p class="hint">Expected = your calories minus break-even, at about 3,500 per lb.${notes.length ? ' ' + notes.join(' ') : ''}</p>
   </section>`;
 }
 
